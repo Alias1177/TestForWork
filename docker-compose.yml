@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: usdt_rates
+      POSTGRES_USER: postgres  
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d usdt_rates"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app:
+    build: .
+    restart: always
+    ports:
+      - "8080:8080"  # gRPC server
+      - "9090:9090"  # Metrics server
+    environment:
+      # Database configuration
+      USDT_DATABASE_HOST: postgres
+      USDT_DATABASE_PORT: 5432
+      USDT_DATABASE_USER: postgres
+      USDT_DATABASE_PASSWORD: postgres
+      USDT_DATABASE_DATABASE: usdt_rates
+      USDT_DATABASE_SSL_MODE: disable
+      
+      # Server configuration
+      USDT_SERVER_PORT: 8080
+      USDT_SERVER_GRACEFUL_TIMEOUT: 30s
+      
+      # Grinex API configuration
+      USDT_GRINEX_BASE_URL: https://grinex.io
+      USDT_GRINEX_MARKET: usdtrub
+      USDT_GRINEX_TIMEOUT: 10s
+      
+      # Logging configuration
+      USDT_LOGGING_LEVEL: info
+      USDT_LOGGING_FORMAT: json
+      
+      # Metrics configuration
+      USDT_METRICS_ENABLED: true
+      USDT_METRICS_PORT: 9090
+      USDT_METRICS_PATH: /metrics
+      
+      # Tracing configuration (disabled by default)
+      USDT_TRACING_ENABLED: false
+      USDT_TRACING_JAEGER_URL: http://jaeger:14268/api/traces
+      USDT_TRACING_SERVICE_NAME: usdt-rates-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpcurl", "-plaintext", "localhost:8080", "rates.RatesService/Healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+volumes:
+  postgres_data: 
